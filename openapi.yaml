@@ -8,7 +8,7 @@ info:
     email: support@nexuslink.com
 
 servers:
-  - url: https://your-render-app.onrender.com
+  - url: https://nexuslink-api.onrender.com
     description: Production server
 
 paths:
