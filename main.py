@@ -51,35 +51,7 @@ def get_all_calls():
 
 @app.route('/calls/<call_id>', methods=['GET'])
 def get_call_by_id(call_id):
-    """Obtiene una llamada específica por ID"""
-    try:
-        response = requests.get(f"{FIREBASE_URL}/calls/{call_id}.json")
-        if response.status_code == 200:
-            data = response.json()
-            if data:
-                return jsonify({
-                    "success": True,
-                    "data": data
-                })
-            else:
-                return jsonify({
-                    "success": False,
-                    "error": "Call not found"
-                }), 404
-        else:
-            return jsonify({
-                "success": False,
-                "error": f"Firebase error: {response.status_code}"
-            }), 500
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
-
-@app.route('/calls/search', methods=['GET'])
-def search_calls():
-    """Busca llamadas por cliente o operador"""
+    """Busca llamadas por cliente o operador con formato mejorado"""
     try:
         client = request.args.get('client', '')
         operator = request.args.get('operator', '')
@@ -90,11 +62,12 @@ def search_calls():
             if not all_calls:
                 return jsonify({
                     "success": True,
-                    "data": [],
+                    "message": f"No se encontraron llamadas para el cliente: {client}",
+                    "results": [],
                     "total": 0
                 })
             
-            filtered_calls = {}
+            filtered_calls = []
             for call_id, call_data in all_calls.items():
                 match = True
                 if client and client.lower() not in call_data.get('Client', '').lower():
@@ -103,11 +76,21 @@ def search_calls():
                     match = False
                 
                 if match:
-                    filtered_calls[call_id] = call_data
+                    # Formatear los datos para mejor presentación
+                    formatted_call = {
+                        "call_id": call_id,
+                        "client": call_data.get('Client', 'N/A'),
+                        "operator": call_data.get('Operator', 'N/A'),
+                        "date": call_data.get('Date', 'N/A'),
+                        "conversation_summary": call_data.get('Conversation', 'N/A')[:200] + "..." if len(call_data.get('Conversation', '')) > 200 else call_data.get('Conversation', 'N/A'),
+                        "full_conversation": call_data.get('Conversation', 'N/A')
+                    }
+                    filtered_calls.append(formatted_call)
             
             return jsonify({
                 "success": True,
-                "data": filtered_calls,
+                "message": f"Se encontraron {len(filtered_calls)} llamadas para el cliente: {client}",
+                "results": filtered_calls,
                 "total": len(filtered_calls)
             })
         else:
