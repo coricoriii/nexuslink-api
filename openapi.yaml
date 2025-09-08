@@ -1,0 +1,229 @@
+openapi: 3.0.0
+info:
+  title: NexusLink Call Center API
+  description: API for managing call center data and customer interactions
+  version: 1.0.0
+  contact:
+    name: NexusLink Support
+    email: support@nexuslink.com
+
+servers:
+  - url: https://your-render-app.onrender.com
+    description: Production server
+
+paths:
+  /:
+    get:
+      summary: Health check endpoint
+      operationId: healthCheck
+      responses:
+        '200':
+          description: API status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  version:
+                    type: string
+                  status:
+                    type: string
+
+  /calls:
+    get:
+      summary: Get all calls
+      description: Retrieve all customer service calls
+      operationId: getAllCalls
+      responses:
+        '200':
+          description: List of all calls
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                  total:
+                    type: integer
+    
+    post:
+      summary: Create new call
+      description: Create a new customer service call record
+      operationId: createCall
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - Operator
+                - Client
+                - Conversation
+              properties:
+                Operator:
+                  type: string
+                  description: Name of the operator handling the call
+                Client:
+                  type: string
+                  description: Client name or identifier
+                Conversation:
+                  type: string
+                  description: Call conversation details
+      responses:
+        '201':
+          description: Call created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  call_id:
+                    type: string
+                  data:
+                    type: object
+
+  /calls/{call_id}:
+    get:
+      summary: Get call by ID
+      description: Retrieve a specific call by its ID
+      operationId: getCallById
+      parameters:
+        - name: call_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Unique call identifier
+      responses:
+        '200':
+          description: Call details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+        '404':
+          description: Call not found
+    
+    put:
+      summary: Update call
+      description: Update an existing call record
+      operationId: updateCall
+      parameters:
+        - name: call_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Unique call identifier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                Operator:
+                  type: string
+                Client:
+                  type: string
+                Conversation:
+                  type: string
+      responses:
+        '200':
+          description: Call updated successfully
+
+  /calls/search:
+    get:
+      summary: Search calls
+      description: Search calls by client or operator
+      operationId: searchCalls
+      parameters:
+        - name: client
+          in: query
+          schema:
+            type: string
+          description: Client name to search for
+        - name: operator
+          in: query
+          schema:
+            type: string
+          description: Operator name to search for
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                  total:
+                    type: integer
+
+  /analytics/summary:
+    get:
+      summary: Get analytics summary
+      description: Get summary statistics of all calls
+      operationId: getAnalyticsSummary
+      responses:
+        '200':
+          description: Analytics summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  total_calls:
+                    type: integer
+                  total_operators:
+                    type: integer
+                  total_clients:
+                    type: integer
+                  operators:
+                    type: array
+                    items:
+                      type: string
+                  clients:
+                    type: array
+                    items:
+                      type: string
+
+components:
+  schemas:
+    Call:
+      type: object
+      properties:
+        Call:
+          type: string
+        Operator:
+          type: string
+        Client:
+          type: string
+        Date:
+          type: string
+        Conversation:
+          type: string
+        CreatedAt:
+          type: string
+        UpdatedAt:
+          type: string
