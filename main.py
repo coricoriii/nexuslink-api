@@ -13,6 +13,17 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import os
 import uuid
+
+# Importaciones adicionales para Google Sheets
+import gspread
+from google.oauth2.service_account import Credentials
+import json
+import os
+from datetime import datetime, timedelta
+# Configuración de Google Sheets
+GOOGLE_CREDENTIALS_FILE = 'google-credentials.json'
+GOOGLE_SHEET_NAME = 'Encuesta de satisfacción NEXUSLINK (Respuestas)'  # CAMBIAR POR EL REAL
+
 # Configuración de email
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY')
 FROM_EMAIL = "corysabel2017@gmail.com"
@@ -20,6 +31,172 @@ SURVEY_FORM_URL = "https://forms.gle/df1Wjxw8RQcWXqxZ9"
 
 # URL de tu Firebase
 FIREBASE_URL = "https://nexuslink-7d374-default-rtdb.firebaseio.com"
+
+def init_google_sheets():
+    """Inicializa la conexión con Google Sheets"""
+    try:
+        print("🔍 Iniciando conexión con Google Sheets...")
+        
+        # Verificar si existe el archivo de credenciales
+        if not os.path.exists(GOOGLE_CREDENTIALS_FILE):
+            print(f"❌ Archivo {GOOGLE_CREDENTIALS_FILE} no encontrado")
+            return None
+            
+        print(f"✅ Archivo de credenciales encontrado: {GOOGLE_CREDENTIALS_FILE}")
+        
+        # Definir los scopes necesarios
+        scope = [
+            'https://spreadsheets.google.com/feeds',
+            'https://www.googleapis.com/auth/drive'
+        ]
+        print(f"✅ Scopes configurados: {scope}")
+        
+        # Crear credenciales desde archivo
+        creds = Credentials.from_service_account_file(GOOGLE_CREDENTIALS_FILE, scopes=scope)
+        print("✅ Credenciales cargadas correctamente")
+        
+        # Autorizar cliente de gspread
+        client = gspread.authorize(creds)
+        print("✅ Cliente autorizado correctamente")
+        
+        return client
+        
+    except Exception as e:
+        print(f"❌ Error inicializando Google Sheets: {str(e)}")
+        print(f"❌ Tipo de error: {type(e).__name__}")
+        return None
+
+def get_survey_responses_from_sheets():
+    """Obtiene las respuestas del formulario desde Google Sheets"""
+    try:
+        print("📊 Obteniendo respuestas del formulario...")
+        
+        # Inicializar cliente
+        client = init_google_sheets()
+        if not client:
+            return {"error": "No se pudo conectar con Google Sheets"}
+        
+        print(f"📋 Intentando abrir sheet: '{GOOGLE_SHEET_NAME}'")
+        
+        # Abrir la hoja de cálculo
+        try:
+            sheet = client.open(GOOGLE_SHEET_NAME).sheet1
+            print(f"✅ Sheet abierto correctamente")
+        except gspread.SpreadsheetNotFound:
+            print(f"❌ Sheet no encontrado: {GOOGLE_SHEET_NAME}")
+            return {"error": f"Sheet '{GOOGLE_SHEET_NAME}' no encontrado o no compartido correctamente"}
+        except Exception as sheet_error:
+            print(f"❌ Error abriendo sheet: {str(sheet_error)}")
+            return {"error": f"Error accediendo al sheet: {str(sheet_error)}"}
+        
+        # Obtener todos los valores
+        print("📥 Obteniendo datos del sheet...")
+        all_values = sheet.get_all_values()
+        
+        if not all_values:
+            print("⚠️ El sheet está vacío")
+            return {"error": "El sheet está vacío"}
+        
+        print(f"✅ Se obtuvieron {len(all_values)} filas")
+        
+        # La primera fila son los headers
+        headers = all_values[0]
+        print(f"📋 Headers encontrados: {headers}")
+        
+        # Convertir a lista de diccionarios
+        records = []
+        for row in all_values[1:]:  # Saltar header
+            if any(cell.strip() for cell in row):  # Solo filas no vacías
+                record = {}
+                for i, header in enumerate(headers):
+                    value = row[i] if i < len(row) else ''
+                    record[header] = value
+                records.append(record)
+        
+        print(f"✅ Se procesaron {len(records)} respuestas")
+        
+        return {
+            "success": True,
+            "data": records,
+            "headers": headers,
+            "total": len(records)
+        }
+        
+    except Exception as e:
+        error_msg = f"Error obteniendo respuestas: {str(e)}"
+        print(f"❌ {error_msg}")
+        return {"error": error_msg}
+
+def analyze_survey_responses(responses_data):
+    """Analiza las respuestas y genera estadísticas"""
+    try:
+        if "error" in responses_data:
+            return {"error": responses_data["error"]}
+        
+        records = responses_data["data"]
+        headers = responses_data["headers"]
+        
+        print(f"🔍 Analizando {len(records)} respuestas...")
+        print(f"🔍 Headers disponibles: {headers}")
+        
+        analysis = {
+            "total_responses": len(records),
+            "headers": headers,
+            "ratings": {},
+            "text_responses": {},
+            "statistics": {},
+            "recent_responses": records[-5:] if len(records) > 5 else records
+        }
+        
+        # Analizar cada columna
+        for header in headers:
+            column_values = [record.get(header, '') for record in records]
+            non_empty_values = [val for val in column_values if str(val).strip()]
+            
+            print(f"🔍 Analizando columna: {header} ({len(non_empty_values)} valores)")
+            
+            # Detectar si es una columna de rating/calificación
+            if any(word in header.lower() for word in ['califica', 'rating', 'puntuación', 'estrellas', 'score']):
+                numeric_values = []
+                for val in non_empty_values:
+                    try:
+                        if str(val).replace('.', '').replace(',', '').isdigit():
+                            numeric_values.append(float(str(val).replace(',', '.')))
+                    except:
+                        continue
+                
+                if numeric_values:
+                    analysis["ratings"][header] = {
+                        "average": round(sum(numeric_values) / len(numeric_values), 2),
+                        "count": len(numeric_values),
+                        "min": min(numeric_values),
+                        "max": max(numeric_values),
+                        "distribution": {}
+                    }
+                    
+                    # Calcular distribución
+                    for val in numeric_values:
+                        val_str = str(int(val))
+                        analysis["ratings"][header]["distribution"][val_str] = analysis["ratings"][header]["distribution"].get(val_str, 0) + 1
+                    
+                    print(f"📊 Rating {header}: Promedio {analysis['ratings'][header]['average']}")
+            
+            # Detectar columnas de texto (comentarios, etc.)
+            elif any(word in header.lower() for word in ['comentario', 'comment', 'observ', 'suggest', 'feedback']):
+                meaningful_comments = [val for val in non_empty_values if len(str(val).strip()) > 5]
+                analysis["text_responses"][header] = {
+                    "total_responses": len(meaningful_comments),
+                    "sample_responses": meaningful_comments[:5]  # Primeros 5 comentarios
+                }
+                print(f"💬 Comentarios en {header}: {len(meaningful_comments)} respuestas")
+        
+        return analysis
+        
+    except Exception as e:
+        error_msg = f"Error analizando respuestas: {str(e)}"
+        print(f"❌ {error_msg}")
+        return {"error": error_msg}
+
 
 @app.route('/', methods=['GET'])
 def home():
@@ -675,6 +852,400 @@ def get_all_surveys():
             "success": False,
             "error": str(e)
         }), 500
+    
+@app.route('/surveys/google-responses', methods=['GET'])
+def get_google_survey_responses():
+    """Obtiene respuestas desde Google Sheets y las analiza"""
+    try:
+        print("🚀 Endpoint /surveys/google-responses llamado")
+        
+        # Obtener respuestas
+        responses_data = get_survey_responses_from_sheets()
+        
+        if "error" in responses_data:
+            return jsonify({
+                "success": False,
+                "error": responses_data["error"]
+            }), 500
+        
+        # Analizar respuestas
+        analysis = analyze_survey_responses(responses_data)
+        
+        if "error" in analysis:
+            return jsonify({
+                "success": False,
+                "error": analysis["error"]
+            }), 500
+        
+        return jsonify({
+            "success": True,
+            "message": "Survey responses retrieved successfully",
+            "data": analysis
+        })
+        
+    except Exception as e:
+        print(f"❌ Error en endpoint: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/surveys/satisfaction-summary', methods=['GET'])
+def get_satisfaction_summary():
+    """Obtiene resumen de satisfacción para el agente"""
+    try:
+        print("📊 Generando resumen de satisfacción...")
+        
+        # Obtener y analizar datos
+        responses_data = get_survey_responses_from_sheets()
+        if "error" in responses_data:
+            return jsonify({
+                "success": False,
+                "error": responses_data["error"]
+            }), 500
+        
+        analysis = analyze_survey_responses(responses_data)
+        if "error" in analysis:
+            return jsonify({
+                "success": False,
+                "error": analysis["error"]
+            }), 500
+        
+        # Crear resumen amigable para el agente
+        summary = {
+            "overview": {
+                "total_responses": analysis["total_responses"],
+                "survey_columns": analysis["headers"]
+            },
+            "satisfaction_scores": {},
+            "key_insights": [],
+            "recent_feedback": []
+        }
+        
+        # Procesar ratings
+        for rating_column, rating_data in analysis.get("ratings", {}).items():
+            summary["satisfaction_scores"][rating_column] = {
+                "average_score": rating_data["average"],
+                "total_responses": rating_data["count"],
+                "score_range": f"{rating_data['min']}-{rating_data['max']}",
+                "distribution": rating_data["distribution"]
+            }
+            
+            # Generar insights
+            avg = rating_data["average"]
+            if avg >= 4.5:
+                summary["key_insights"].append(f"Excellent satisfaction in '{rating_column}' (avg: {avg})")
+            elif avg >= 3.5:
+                summary["key_insights"].append(f"Good satisfaction in '{rating_column}' (avg: {avg})")
+            elif avg < 3.0:
+                summary["key_insights"].append(f"Needs improvement in '{rating_column}' (avg: {avg})")
+        
+        # Procesar comentarios
+        for text_column, text_data in analysis.get("text_responses", {}).items():
+            if text_data["sample_responses"]:
+                summary["recent_feedback"].extend([
+                    {"source": text_column, "comment": comment} 
+                    for comment in text_data["sample_responses"][:3]
+                ])
+        
+        return jsonify({
+            "success": True,
+            "satisfaction_summary": summary
+        })
+        
+    except Exception as e:
+        print(f"❌ Error en satisfaction summary: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/surveys/customer-comments', methods=['GET'])
+def get_customer_comments():
+    """Obtiene comentarios de clientes"""
+    try:
+        print("💬 Obteniendo comentarios de clientes...")
+        
+        responses_data = get_survey_responses_from_sheets()
+        if "error" in responses_data:
+            return jsonify({
+                "success": False,
+                "error": responses_data["error"]
+            }), 500
+        
+        analysis = analyze_survey_responses(responses_data)
+        if "error" in analysis:
+            return jsonify({
+                "success": False,
+                "error": analysis["error"]
+            }), 500
+        
+        # Recopilar todos los comentarios
+        all_comments = []
+        for text_column, text_data in analysis.get("text_responses", {}).items():
+            for comment in text_data["sample_responses"]:
+                all_comments.append({
+                    "source_column": text_column,
+                    "comment": comment,
+                    "length": len(str(comment))
+                })
+        
+        # Ordenar por longitud (comentarios más detallados primero)
+        all_comments.sort(key=lambda x: x["length"], reverse=True)
+        
+        return jsonify({
+            "success": True,
+            "total_comments": len(all_comments),
+            "comments": all_comments[:10],  # Top 10 comentarios
+            "summary": {
+                "total_text_columns": len(analysis.get("text_responses", {})),
+                "average_comment_length": sum(c["length"] for c in all_comments) / len(all_comments) if all_comments else 0
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ Error obteniendo comentarios: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/surveys/answer-question', methods=['POST'])
+def answer_survey_question():
+    """Responde preguntas específicas sobre las encuestas"""
+    try:
+        data = request.get_json()
+        question = data.get('question', '').lower()
+        
+        print(f"❓ Pregunta recibida: {question}")
+        
+        # Obtener datos actualizados
+        responses_data = get_survey_responses_from_sheets()
+        if "error" in responses_data:
+            return jsonify({
+                "success": False,
+                "error": responses_data["error"]
+            }), 500
+        
+        analysis = analyze_survey_responses(responses_data)
+        if "error" in analysis:
+            return jsonify({
+                "success": False,
+                "error": analysis["error"]
+            }), 500
+        
+        # Generar respuesta según la pregunta
+        answer = generate_intelligent_answer(question, analysis)
+        
+        return jsonify({
+            "success": True,
+            "question": data.get('question'),
+            "answer": answer,
+            "data_timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"❌ Error respondiendo pregunta: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+def generate_intelligent_answer(question, analysis):
+    """Genera respuestas inteligentes basadas en los datos"""
+    
+    total = analysis["total_responses"]
+    ratings = analysis.get("ratings", {})
+    comments = analysis.get("text_responses", {})
+    
+    # Preguntas sobre satisfacción
+    if any(word in question for word in ['satisfacción', 'satisfaction', 'rating', 'calificación']):
+        if not ratings:
+            return "No se encontraron datos de calificación en las respuestas."
+        
+        answer = f"📊 **Resumen de Satisfacción** (basado en {total} respuestas):\n\n"
+        for column, data in ratings.items():
+            avg = data["average"]
+            count = data["count"]
+            answer += f"• **{column}**: {avg}/5.0 promedio ({count} respuestas)\n"
+            
+            if avg >= 4.5:
+                answer += f"  ✅ Excelente nivel de satisfacción\n"
+            elif avg >= 3.5:
+                answer += f"  👍 Buen nivel de satisfacción\n"
+            else:
+                answer += f"  ⚠️ Área de mejora identificada\n"
+            answer += "\n"
+        
+        return answer
+    
+    # Preguntas sobre comentarios
+    elif any(word in question for word in ['comentarios', 'comments', 'feedback', 'opiniones']):
+        if not comments:
+            return "No se encontraron comentarios en las respuestas."
+        
+        answer = f"💬 **Comentarios de Clientes**:\n\n"
+        comment_count = 0
+        for column, data in comments.items():
+            answer += f"**{column}** ({data['total_responses']} comentarios):\n"
+            for i, comment in enumerate(data['sample_responses'][:3], 1):
+                answer += f"{i}. \"{comment}\"\n"
+                comment_count += 1
+            answer += "\n"
+        
+        answer += f"📝 Total de comentarios procesados: {comment_count}"
+        return answer
+    
+    # Preguntas sobre totales/resumen
+    elif any(word in question for word in ['cuántas', 'total', 'resumen', 'summary']):
+        answer = f"📈 **Resumen General de Encuestas**:\n\n"
+        answer += f"📊 **Total de respuestas**: {total}\n"
+        answer += f"📋 **Columnas en el formulario**: {len(analysis['headers'])}\n\n"
+        
+        if ratings:
+            answer += f"🌟 **Métricas de Satisfacción**:\n"
+            for column, data in ratings.items():
+                answer += f"• {column}: {data['average']}/5.0\n"
+            answer += "\n"
+        
+        if comments:
+            total_comments = sum(data['total_responses'] for data in comments.values())
+            answer += f"💬 **Total de comentarios**: {total_comments}\n"
+        
+        return answer
+    
+    # Pregunta no reconocida
+    else:
+        return f"❓ No pude identificar el tipo de pregunta. Puedes preguntar sobre:\n• Satisfacción/calificaciones\n• Comentarios/feedback\n• Resumen/totales\n\nDatos disponibles: {total} respuestas con {len(analysis['headers'])} columnas."
+
+# ENDPOINT DE DEBUG COMPLETO
+@app.route('/debug/google-sheets-test', methods=['GET'])
+def debug_google_sheets_complete():
+    """Endpoint completo de debugging para Google Sheets"""
+    try:
+        debug_info = {
+            "step_1_file_check": {},
+            "step_2_credentials": {},
+            "step_3_connection": {},
+            "step_4_sheet_access": {},
+            "step_5_data_sample": {}
+        }
+        
+        # PASO 1: Verificar archivo
+        print("🔍 PASO 1: Verificando archivo de credenciales...")
+        if os.path.exists(GOOGLE_CREDENTIALS_FILE):
+            file_size = os.path.getsize(GOOGLE_CREDENTIALS_FILE)
+            debug_info["step_1_file_check"] = {
+                "file_exists": True,
+                "file_size": file_size,
+                "file_path": GOOGLE_CREDENTIALS_FILE
+            }
+            print(f"✅ Archivo encontrado: {file_size} bytes")
+        else:
+            debug_info["step_1_file_check"] = {
+                "file_exists": False,
+                "error": f"Archivo {GOOGLE_CREDENTIALS_FILE} no encontrado"
+            }
+            print("❌ Archivo no encontrado")
+            return jsonify({"debug": debug_info})
+        
+        # PASO 2: Verificar credenciales
+        print("🔍 PASO 2: Verificando credenciales...")
+        try:
+            with open(GOOGLE_CREDENTIALS_FILE, 'r') as f:
+                creds_content = json.load(f)
+            
+            debug_info["step_2_credentials"] = {
+                "valid_json": True,
+                "client_email": creds_content.get("client_email", "No encontrado"),
+                "project_id": creds_content.get("project_id", "No encontrado"),
+                "has_private_key": "private_key" in creds_content
+            }
+            print(f"✅ Credenciales válidas para: {creds_content.get('client_email')}")
+        except Exception as cred_error:
+            debug_info["step_2_credentials"] = {
+                "valid_json": False,
+                "error": str(cred_error)
+            }
+            print(f"❌ Error en credenciales: {cred_error}")
+            return jsonify({"debug": debug_info})
+        
+        # PASO 3: Probar conexión
+        print("🔍 PASO 3: Probando conexión...")
+        client = init_google_sheets()
+        if client:
+            debug_info["step_3_connection"] = {
+                "connection_successful": True,
+                "client_type": str(type(client))
+            }
+            print("✅ Conexión exitosa")
+        else:
+            debug_info["step_3_connection"] = {
+                "connection_successful": False,
+                "error": "No se pudo crear cliente"
+            }
+            print("❌ Fallo en conexión")
+            return jsonify({"debug": debug_info})
+        
+        # PASO 4: Acceder al sheet
+        print(f"🔍 PASO 4: Intentando acceder a sheet '{GOOGLE_SHEET_NAME}'...")
+        try:
+            sheet = client.open(GOOGLE_SHEET_NAME).sheet1
+            sheet_info = {
+                "sheet_accessible": True,
+                "sheet_title": sheet.title,
+                "sheet_id": sheet.id,
+                "row_count": sheet.row_count,
+                "col_count": sheet.col_count
+            }
+            debug_info["step_4_sheet_access"] = sheet_info
+            print(f"✅ Sheet accesible: {sheet.title}")
+        except Exception as sheet_error:
+            debug_info["step_4_sheet_access"] = {
+                "sheet_accessible": False,
+                "error": str(sheet_error),
+                "sheet_name_tried": GOOGLE_SHEET_NAME
+            }
+            print(f"❌ Error accediendo sheet: {sheet_error}")
+            return jsonify({"debug": debug_info})
+        
+        # PASO 5: Obtener datos de muestra
+        print("🔍 PASO 5: Obteniendo datos de muestra...")
+        try:
+            all_values = sheet.get_all_values()
+            headers = all_values[0] if all_values else []
+            sample_rows = all_values[1:4] if len(all_values) > 1 else []  # Primeras 3 filas de datos
+            
+            debug_info["step_5_data_sample"] = {
+                "data_retrieved": True,
+                "total_rows": len(all_values),
+                "headers": headers,
+                "sample_data": sample_rows,
+                "headers_count": len(headers)
+            }
+            print(f"✅ Datos obtenidos: {len(all_values)} filas")
+        except Exception as data_error:
+            debug_info["step_5_data_sample"] = {
+                "data_retrieved": False,
+                "error": str(data_error)
+            }
+            print(f"❌ Error obteniendo datos: {data_error}")
+        
+        return jsonify({
+            "debug": debug_info,
+            "overall_status": "SUCCESS" if debug_info["step_5_data_sample"].get("data_retrieved") else "FAILED",
+            "next_steps": [
+                "Verificar que el sheet esté compartido con la cuenta de servicio",
+                "Confirmar que el nombre del sheet sea exacto",
+                "Verificar que haya datos en el formulario"
+            ]
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "debug": {"general_error": str(e)},
+            "overall_status": "FAILED"
+        })
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
