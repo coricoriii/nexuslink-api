@@ -16,7 +16,7 @@ import uuid
 # Configuración de email
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY')
 FROM_EMAIL = "corysabel2017@gmail.com"
-SURVEY_FORM_URL = "https://forms.gle/rzLt3ZexoZfg4ni36"  # Tu Google Form
+SURVEY_FORM_URL = "https://forms.gle/df1Wjxw8RQcWXqxZ9"  
 
 # URL de tu Firebase
 FIREBASE_URL = "https://nexuslink-7d374-default-rtdb.firebaseio.com"
@@ -62,6 +62,34 @@ def get_all_calls():
 
 @app.route('/calls/<call_id>', methods=['GET'])
 def get_call_by_id(call_id):
+    """Obtiene una llamada específica por ID"""
+    try:
+        response = requests.get(f"{FIREBASE_URL}/calls/{call_id}.json")
+        if response.status_code == 200:
+            data = response.json()
+            if data:
+                return jsonify({
+                    "success": True,
+                    "data": data
+                })
+            else:
+                return jsonify({
+                    "success": False,
+                    "error": "Call not found"
+                }), 404
+        else:
+            return jsonify({
+                "success": False,
+                "error": f"Firebase error: {response.status_code}"
+            }), 500
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/calls/search', methods=['GET'])
+def search_calls():
     """Busca llamadas por cliente o operador con formato mejorado"""
     try:
         client = request.args.get('client', '')
@@ -163,31 +191,138 @@ def create_call():
 
 @app.route('/calls/<call_id>', methods=['PUT'])
 def update_call(call_id):
-    """Actualiza una llamada existente"""
+    """Actualiza una llamada existente - VERSIÓN MEJORADA"""
     try:
         data = request.get_json()
-        data['UpdatedAt'] = datetime.now().isoformat()
         
-        response = requests.patch(f"{FIREBASE_URL}/calls/{call_id}.json", 
-                                json=data)
+        # Debug: mostrar datos recibidos
+        print(f"📝 Updating call {call_id} with data:", data)
         
-        if response.status_code == 200:
+        # Verificar que la llamada existe
+        get_response = requests.get(f"{FIREBASE_URL}/calls/{call_id}.json")
+        if get_response.status_code != 200 or not get_response.json():
+            return jsonify({
+                "success": False,
+                "error": f"Call {call_id} not found"
+            }), 404
+        
+        # Obtener datos actuales
+        current_data = get_response.json()
+        print(f"📋 Current data:", current_data)
+        
+        # Preparar datos para actualización
+        update_data = {}
+        
+        # Actualizar solo los campos que se enviaron
+        updatable_fields = ['Call', 'Client', 'Operator', 'Conversation', 'Correo']
+        
+        for field in updatable_fields:
+            if field in data and data[field] is not None:
+                # Limpiar el dato
+                if field == 'Conversation':
+                    # Limpiar conversación
+                    clean_value = str(data[field]).replace('\n', ' ').replace('\r', ' ')
+                    clean_value = ' '.join(clean_value.split())
+                    update_data[field] = clean_value
+                elif field == 'Correo':
+                    # Validar email
+                    import re
+                    email = str(data[field]).strip().lower()
+                    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+                    if not re.match(email_pattern, email):
+                        return jsonify({
+                            "success": False,
+                            "error": f"Invalid email format: {email}"
+                        }), 400
+                    update_data[field] = email
+                else:
+                    # Campos normales
+                    update_data[field] = str(data[field]).strip()
+        
+        # Agregar timestamp de actualización
+        update_data['UpdatedAt'] = datetime.now().isoformat()
+        
+        print(f"🔄 Data to update:", update_data)
+        
+        # Actualizar en Firebase usando PATCH (actualización parcial)
+        update_response = requests.patch(
+            f"{FIREBASE_URL}/calls/{call_id}.json",
+            json=update_data,
+            headers={'Content-Type': 'application/json; charset=utf-8'}
+        )
+        
+        print(f"🌐 Firebase response status: {update_response.status_code}")
+        print(f"🌐 Firebase response text: {update_response.text}")
+        
+        if update_response.status_code == 200:
+            # Verificar que se actualizó correctamente
+            verify_response = requests.get(f"{FIREBASE_URL}/calls/{call_id}.json")
+            updated_data = verify_response.json() if verify_response.status_code == 200 else {}
+            
             return jsonify({
                 "success": True,
-                "message": "Call updated successfully",
-                "call_id": call_id
-            })
+                "message": f"Call {call_id} updated successfully",
+                "call_id": call_id,
+                "updated_fields": list(update_data.keys()),
+                "updated_data": update_data,
+                "verification": {
+                    "current_email": updated_data.get('Correo', 'N/A'),
+                    "current_client": updated_data.get('Client', 'N/A'),
+                    "current_operator": updated_data.get('Operator', 'N/A'),
+                    "last_updated": updated_data.get('UpdatedAt', 'N/A')
+                }
+            }), 200
         else:
             return jsonify({
                 "success": False,
-                "error": f"Firebase error: {response.status_code}"
+                "error": f"Firebase update failed: {update_response.status_code}",
+                "firebase_response": update_response.text
             }), 500
             
     except Exception as e:
+        print(f"❌ Error in update_call: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": f"Server error: {str(e)}"
         }), 500
+
+# Endpoint de prueba para verificar actualizaciones
+@app.route('/calls/<call_id>/test-update', methods=['POST'])
+def test_update_call(call_id):
+    """Endpoint de prueba para actualizaciones"""
+    try:
+        # Datos de prueba
+        test_data = {
+            "Correo": "test.update@email.com",
+            "UpdatedAt": datetime.now().isoformat()
+        }
+        
+        print(f"🧪 Testing update for call {call_id}")
+        
+        # Simular actualización
+        update_response = requests.patch(
+            f"{FIREBASE_URL}/calls/{call_id}.json",
+            json=test_data
+        )
+        
+        # Verificar resultado
+        get_response = requests.get(f"{FIREBASE_URL}/calls/{call_id}.json")
+        current_data = get_response.json() if get_response.status_code == 200 else {}
+        
+        return jsonify({
+            "test_update": {
+                "call_id": call_id,
+                "attempted_data": test_data,
+                "firebase_status": update_response.status_code,
+                "firebase_response": update_response.text,
+                "current_email_in_db": current_data.get('Correo', 'Not found'),
+                "update_successful": current_data.get('Correo') == test_data['Correo'],
+                "full_current_data": current_data
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)})
 
 @app.route('/analytics/summary', methods=['GET'])
 def get_summary():
