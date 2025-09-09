@@ -207,6 +207,88 @@ paths:
                     type: array
                     items:
                       type: string
+                      
+  /calls/{call_id}/send-survey:
+    post:
+      summary: Send satisfaction survey
+      description: Send customer satisfaction survey via email for a specific call
+      operationId: sendSatisfactionSurvey
+      parameters:
+        - name: call_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Call ID to send survey for
+      responses:
+        '200':
+          description: Survey sent successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  survey_id:
+                    type: string
+                  sent_to:
+                    type: string
+                  client_id:
+                    type: string
+        '400':
+          description: No email found or survey already sent
+        '404':
+          description: Call not found
+
+  /surveys/stats:
+    get:
+      summary: Get survey statistics
+      description: Get statistics about sent satisfaction surveys
+      operationId: getSurveyStats
+      responses:
+        '200':
+          description: Survey statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  stats:
+                    type: object
+                    properties:
+                      total_sent:
+                        type: integer
+                      by_operator:
+                        type: object
+                      recent_surveys:
+                        type: array
+                      today_count:
+                        type: integer
+
+  /surveys:
+    get:
+      summary: List all surveys
+      description: Get list of all sent surveys
+      operationId: getAllSurveys
+      responses:
+        '200':
+          description: List of surveys
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  surveys:
+                    type: array
+                  total:
+                    type: integer
 
 components:
   schemas:
