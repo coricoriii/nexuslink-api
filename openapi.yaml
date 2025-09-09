@@ -429,15 +429,7 @@ paths:
                     type: array
                   total:
                     type: integer
-                    
-  /surveys/google-responses:
-    get:
-      summary: Get Google Forms responses via Sheets
-      description: Retrieve and analyze survey responses from Google Sheets
-      operationId: getGoogleSurveyResponses
-      responses:
-        '200':
-          description: Survey
+  
 
 components:
   schemas:
