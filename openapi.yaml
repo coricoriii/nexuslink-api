@@ -53,7 +53,20 @@ paths:
     
     post:
       summary: Create new call record
-      description: Create a new customer service call record with all required information
+      description: |
+        Create a new customer service call record with complete information.
+        
+        **🚨 CRITICAL: ALL 5 fields below are MANDATORY and must be collected before making the API call:**
+        
+        1. **Call** - Call identifier (e.g., "llamada 15") - REQUIRED
+        2. **Client** - Client ID or phone number - REQUIRED  
+        3. **Operator** - Full name of the operator - REQUIRED
+        4. **Conversation** - Complete conversation transcript - REQUIRED
+        5. **Correo** - Client's email address - REQUIRED (needed for surveys and follow-up)
+        
+        ⚠️ The API will return a 400 error if ANY of these fields is missing or empty.
+        
+        📧 The email field (Correo) is especially important as it's used for sending satisfaction surveys.
       operationId: createCall
       requestBody:
         required: true
@@ -70,24 +83,24 @@ paths:
               properties:
                 Call:
                   type: string
-                  description: Call identifier (e.g., "llamada 10")
+                  description: "🔢 **REQUIRED FIELD #1** - Call identifier or call number (e.g., 'llamada 15', 'llamada 20')"
                   example: "llamada 15"
                 Client:
                   type: string
-                  description: Client ID or phone number
+                  description: "👤 **REQUIRED FIELD #2** - Client ID, phone number, or client identifier"
                   example: "62351441"
                 Operator:
                   type: string
-                  description: Full name of the operator handling the call
+                  description: "🧑‍💼 **REQUIRED FIELD #3** - Full name of the operator handling the call"
                   example: "Jesus Madero"
                 Conversation:
                   type: string
-                  description: Complete conversation transcript between operator and client
+                  description: "💬 **REQUIRED FIELD #4** - Complete conversation transcript between operator and client"
                   example: "Operador: Buenos días, me comunico de soporte técnico. Cliente: Hola, tengo problemas con internet..."
                 Correo:
                   type: string
                   format: email
-                  description: Client's email address for follow-up
+                  description: "📧 **REQUIRED FIELD #5** - Client's email address (MANDATORY for sending follow-up surveys and communications)"
                   example: "cliente@email.com"
       responses:
         '201':
