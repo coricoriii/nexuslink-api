@@ -52,8 +52,8 @@ paths:
                     type: integer
     
     post:
-      summary: Create new call
-      description: Create a new customer service call record
+      summary: Create new call record
+      description: Create a new customer service call record with all required information
       operationId: createCall
       requestBody:
         required: true
@@ -62,19 +62,33 @@ paths:
             schema:
               type: object
               required:
-                - Operator
+                - Call
                 - Client
+                - Operator
                 - Conversation
+                - Correo
               properties:
-                Operator:
+                Call:
                   type: string
-                  description: Name of the operator handling the call
+                  description: Call identifier (e.g., "llamada 10")
+                  example: "llamada 15"
                 Client:
                   type: string
-                  description: Client name or identifier
+                  description: Client ID or phone number
+                  example: "62351441"
+                Operator:
+                  type: string
+                  description: Full name of the operator handling the call
+                  example: "Jesus Madero"
                 Conversation:
                   type: string
-                  description: Call conversation details
+                  description: Complete conversation transcript between operator and client
+                  example: "Operador: Buenos días, me comunico de soporte técnico. Cliente: Hola, tengo problemas con internet..."
+                Correo:
+                  type: string
+                  format: email
+                  description: Client's email address for follow-up
+                  example: "cliente@email.com"
       responses:
         '201':
           description: Call created successfully
@@ -85,12 +99,115 @@ paths:
                 properties:
                   success:
                     type: boolean
+                    example: true
                   message:
                     type: string
+                    example: "Call created successfully"
                   call_id:
                     type: string
+                    example: "call_1234567890"
                   data:
                     type: object
+                    description: The created call record
+                  summary:
+                    type: object
+                    properties:
+                      call_name:
+                        type: string
+                      client_id:
+                        type: string
+                      operator:
+                        type: string
+                      email:
+                        type: string
+                      conversation_length:
+                        type: integer
+                      date_created:
+                        type: string
+        '400':
+          description: Missing required fields or invalid data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: "Missing required fields. Please provide all the following information:"
+                  missing_fields:
+                    type: array
+                    items:
+                      type: string
+                    example: ["Call - Call identifier", "Correo - Client email address"]
+                  required_fields:
+                    type: array
+                    items:
+                      type: string
+                    example: ["Call", "Client", "Operator", "Conversation", "Correo"]
+                  example:
+                    type: object
+                    properties:
+                      Call:
+                        type: string
+                        example: "llamada 15"
+                      Client:
+                        type: string
+                        example: "62351441"
+                      Operator:
+                        type: string
+                        example: "Jesus Madero"
+                      Conversation:
+                        type: string
+                        example: "Operador: Buenos días..."
+                      Correo:
+                        type: string
+                        example: "cliente@email.com"
+
+  /calls/format:
+    get:
+      summary: Get call creation format
+      description: Returns the required format and fields for creating a new call
+      operationId: getCallFormat
+      responses:
+        '200':
+          description: Call format requirements
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  required_fields:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        description:
+                          type: string
+                        example:
+                          type: string
+                        required:
+                          type: boolean
+                  example_request:
+                    type: object
+                    properties:
+                      Call:
+                        type: string
+                        example: "llamada 15"
+                      Client:
+                        type: string
+                        example: "62351441"
+                      Operator:
+                        type: string
+                        example: "Jesus Madero"
+                      Conversation:
+                        type: string
+                        example: "Operador: Buenos días..."
+                      Correo:
+                        type: string
+                        example: "silvia.trejor@uanl.edu.mx"
 
   /calls/{call_id}:
     get:
@@ -137,12 +254,22 @@ paths:
             schema:
               type: object
               properties:
+                Call:
+                  type: string
+                  description: Call identifier
                 Operator:
                   type: string
+                  description: Operator name
                 Client:
                   type: string
+                  description: Client ID
                 Conversation:
                   type: string
+                  description: Conversation transcript
+                Correo:
+                  type: string
+                  format: email
+                  description: Client email
       responses:
         '200':
           description: Call updated successfully
@@ -297,15 +424,34 @@ components:
       properties:
         Call:
           type: string
+          description: Call identifier
+          example: "llamada 15"
         Operator:
           type: string
+          description: Operator name
+          example: "Jesus Madero"
         Client:
           type: string
+          description: Client ID or phone number
+          example: "62351441"
         Date:
           type: string
+          description: Call date
+          example: "2025-03-12"
         Conversation:
           type: string
+          description: Complete conversation transcript
+          example: "Operador: Buenos días, me comunico de soporte técnico..."
+        Correo:
+          type: string
+          format: email
+          description: Client email address
+          example: "silvia.trejor@uanl.edu.mx"
         CreatedAt:
           type: string
+          format: date-time
+          description: Timestamp when call was created
         UpdatedAt:
           type: string
+          format: date-time
+          description: Timestamp when call was last updated
