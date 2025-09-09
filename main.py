@@ -7,6 +7,17 @@ from datetime import datetime
 app = Flask(__name__)
 CORS(app)
 
+# Imports para API SENDGRID
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import os
+import uuid
+# Configuración de email
+SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY')
+FROM_EMAIL = "corysabel2017@gmail.com"
+SURVEY_FORM_URL = "https://forms.gle/rzLt3ZexoZfg4ni36"  # Tu Google Form
+
 # URL de tu Firebase
 FIREBASE_URL = "https://nexuslink-7d374-default-rtdb.firebaseio.com"
 
@@ -212,6 +223,317 @@ def get_summary():
             return jsonify({
                 "success": False,
                 "error": f"Firebase error: {response.status_code}"
+            }), 500
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+    
+@app.route('/calls/<call_id>/send-survey', methods=['POST'])
+def send_satisfaction_survey(call_id):
+    """Envía encuesta de satisfacción por email"""
+    try:
+        # 1. Obtener detalles de la llamada
+        call_response = requests.get(f"{FIREBASE_URL}/calls/{call_id}.json")
+        if call_response.status_code != 200 or not call_response.json():
+            return jsonify({
+                "success": False,
+                "error": f"Call {call_id} not found"
+            }), 404
+            
+        call_data = call_response.json()
+        
+        # 2. Verificar que tiene correo
+        client_email = call_data.get('Correo')
+        if not client_email:
+            return jsonify({
+                "success": False,
+                "error": f"No email found for call {call_id}"
+            }), 400
+        
+        # 3. Obtener datos básicos
+        client_id = call_data.get('Client', 'Cliente')
+        operator_name = call_data.get('Operator', 'Operador')
+        call_date = call_data.get('Date', 'Fecha no disponible')
+        
+        # 4. Verificar si ya se envió encuesta para esta llamada
+        existing_survey = check_existing_survey(call_id)
+        if existing_survey:
+            return jsonify({
+                "success": False,
+                "error": f"Survey already sent for this call on {existing_survey['sent_at']}"
+            }), 400
+        
+        # 5. Crear contenido del email
+        email_content = create_simple_email_content(client_id, operator_name, call_date)
+        
+        # 6. Enviar email
+        email_sent = send_email(client_email, "Evaluación de Servicio - NEXUSLINK", email_content)
+        
+        if email_sent:
+            # 7. Registrar envío en Firebase
+            survey_data = {
+                "call_id": call_id,
+                "client_id": client_id,
+                "client_email": client_email,
+                "operator_name": operator_name,
+                "call_date": call_date,
+                "sent_at": datetime.now().isoformat(),
+                "status": "sent"
+            }
+            
+            # Guardar con ID único
+            survey_id = f"survey_{call_id}_{int(datetime.now().timestamp())}"
+            requests.put(f"{FIREBASE_URL}/surveys/{survey_id}.json", json=survey_data)
+            
+            return jsonify({
+                "success": True,
+                "message": f"Survey sent successfully for call {call_id}",
+                "survey_id": survey_id,
+                "sent_to": client_email,
+                "client_id": client_id
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": "Failed to send email"
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+def check_existing_survey(call_id):
+    """Verifica si ya se envió encuesta para esta llamada"""
+    try:
+        response = requests.get(f"{FIREBASE_URL}/surveys.json")
+        if response.status_code == 200:
+            surveys = response.json() or {}
+            
+            for survey_id, survey_data in surveys.items():
+                if survey_data.get('call_id') == call_id:
+                    return survey_data
+        return None
+    except:
+        return None
+
+def create_simple_email_content(client_id, operator_name, call_date):
+    """Crea el contenido HTML del email (simple)"""
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ 
+                font-family: Arial, sans-serif; 
+                line-height: 1.6; 
+                color: #333; 
+                max-width: 600px;
+                margin: 0 auto;
+                padding: 20px;
+            }}
+            .header {{ 
+                background-color: #0066cc; 
+                color: white; 
+                padding: 30px; 
+                text-align: center; 
+                border-radius: 10px 10px 0 0;
+            }}
+            .content {{ 
+                padding: 30px; 
+                background-color: #f9f9f9; 
+                border-radius: 0 0 10px 10px;
+            }}
+            .button {{ 
+                background-color: #28a745; 
+                color: white; 
+                padding: 15px 40px; 
+                text-decoration: none; 
+                border-radius: 5px; 
+                display: inline-block; 
+                margin: 20px 0;
+                font-weight: bold;
+                font-size: 16px;
+            }}
+            .button:hover {{
+                background-color: #218838;
+            }}
+            .call-info {{
+                background-color: #e9ecef;
+                padding: 15px;
+                border-radius: 5px;
+                margin: 20px 0;
+            }}
+            .footer {{ 
+                text-align: center; 
+                padding: 20px; 
+                font-size: 12px; 
+                color: #666; 
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>🌐 NEXUSLINK</h1>
+            <h2>Evaluación de Servicio</h2>
+        </div>
+        
+        <div class="content">
+            <p>Estimado cliente,</p>
+            
+            <p>Esperamos que haya tenido una excelente experiencia con nuestro servicio de soporte técnico.</p>
+            
+            <div class="call-info">
+                <strong>📞 Detalles de su consulta:</strong><br>
+                • Cliente: {client_id}<br>
+                • Operador: {operator_name}<br>
+                • Fecha: {call_date}
+            </div>
+            
+            <p>Su opinión es muy importante para nosotros. Por favor, tómese unos minutos para evaluar el servicio recibido.</p>
+            
+            <div style="text-align: center;">
+                <a href="{SURVEY_FORM_URL}" class="button">📝 Evaluar Servicio</a>
+            </div>
+            
+            <p><strong>¡Gracias por confiar en NEXUSLINK!</strong></p>
+            <p>Su feedback nos ayuda a mejorar continuamente nuestro servicio.</p>
+        </div>
+        
+        <div class="footer">
+            <p>NEXUSLINK - Conectando tu mundo<br>
+            Este es un email automático, por favor no responder.</p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return html_content
+
+def send_email(to_email, subject, html_content):
+    """Envía email usando SendGrid"""
+    try:
+        import sendgrid
+        from sendgrid.helpers.mail import Mail
+        
+        sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
+        
+        message = Mail(
+            from_email=FROM_EMAIL,
+            to_emails=to_email,
+            subject=subject,
+            html_content=html_content
+        )
+        
+        response = sg.send(message)
+        return response.status_code == 202
+        
+    except Exception as e:
+        print(f"Error sending email: {e}")
+        return False
+
+# Endpoint para obtener estadísticas de encuestas
+@app.route('/surveys/stats', methods=['GET'])
+def get_survey_stats():
+    """Obtiene estadísticas de las encuestas enviadas"""
+    try:
+        response = requests.get(f"{FIREBASE_URL}/surveys.json")
+        if response.status_code == 200:
+            surveys = response.json() or {}
+            
+            if not surveys:
+                return jsonify({
+                    "success": True,
+                    "total_sent": 0,
+                    "by_operator": {},
+                    "recent_surveys": [],
+                    "today_count": 0
+                })
+            
+            # Estadísticas básicas
+            stats = {
+                "total_sent": len(surveys),
+                "by_operator": {},
+                "recent_surveys": [],
+                "today_count": 0
+            }
+            
+            today = datetime.now().strftime('%Y-%m-%d')
+            
+            for survey_id, survey_data in surveys.items():
+                # Contar por operador
+                operator = survey_data.get('operator_name', 'Unknown')
+                if operator not in stats['by_operator']:
+                    stats['by_operator'][operator] = 0
+                stats['by_operator'][operator] += 1
+                
+                # Contar enviadas hoy
+                sent_date = survey_data.get('sent_at', '')[:10]
+                if sent_date == today:
+                    stats['today_count'] += 1
+                
+                # Últimas 10 encuestas
+                if len(stats['recent_surveys']) < 10:
+                    stats['recent_surveys'].append({
+                        "survey_id": survey_id,
+                        "call_id": survey_data.get('call_id'),
+                        "client_id": survey_data.get('client_id'),
+                        "operator": operator,
+                        "sent_at": survey_data.get('sent_at'),
+                        "status": survey_data.get('status')
+                    })
+            
+            # Ordenar encuestas recientes por fecha
+            stats['recent_surveys'].sort(key=lambda x: x['sent_at'], reverse=True)
+            
+            return jsonify({
+                "success": True,
+                "stats": stats
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": "Could not fetch survey data"
+            }), 500
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+# Endpoint para listar todas las encuestas
+@app.route('/surveys', methods=['GET'])
+def get_all_surveys():
+    """Lista todas las encuestas enviadas"""
+    try:
+        response = requests.get(f"{FIREBASE_URL}/surveys.json")
+        if response.status_code == 200:
+            surveys = response.json() or {}
+            
+            survey_list = []
+            for survey_id, survey_data in surveys.items():
+                survey_list.append({
+                    "survey_id": survey_id,
+                    **survey_data
+                })
+            
+            # Ordenar por fecha de envío (más recientes primero)
+            survey_list.sort(key=lambda x: x.get('sent_at', ''), reverse=True)
+            
+            return jsonify({
+                "success": True,
+                "surveys": survey_list,
+                "total": len(survey_list)
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": "Could not fetch surveys"
             }), 500
     except Exception as e:
         return jsonify({
